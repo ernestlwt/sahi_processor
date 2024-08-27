@@ -22,13 +22,13 @@ class SAHIProcessing():
     """
     """
     model_batchsize: int = 8
-    model_input_height: int = 240
-    model_input_width: int = 320
+    model_input_height: int = 400
+    model_input_width: int = 400
 
     sahi_image_height_threshold: int = 900
     sahi_image_width_threshold: int = 900
-    sahi_slice_height: int = 240
-    sahi_slice_width: int = 320
+    sahi_slice_height: int = 400
+    sahi_slice_width: int = 400
     sahi_overlap_height_ratio: float = 0.3
     sahi_overlap_width_ratio: float = 0.3
     sahi_postprocess_match_algo: str = "GREEDYNMM"
@@ -37,7 +37,7 @@ class SAHIProcessing():
     sahi_postprocess_class_agnostic: bool = True
     sahi_auto_slice_resolution: bool = True,
     sahi_include_full_frame: bool = True
-    sahi_crop_full_frame: bool = True
+    sahi_resize_full_frame: bool = True
 
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
@@ -58,7 +58,11 @@ class SAHIProcessing():
             if image_h > self.sahi_image_height_threshold or image_w > self.sahi_image_width_threshold:
 
                 if self.sahi_include_full_frame:
-                    sliced_list.append({"list_position": i, "to_slice": False})
+                    sliced_list.append({
+                        "list_position": i, 
+                        "to_slice": False, 
+                        "original_shape":[image_w, image_h], 
+                        "resized_shape": [self.sahi_slice_width, self.sahi_slice_height] if self.sahi_resize_full_frame else [image_w, image_h]})
 
                 slice_bboxes = get_slice_bboxes(
                     image_h,
@@ -94,8 +98,8 @@ class SAHIProcessing():
                     ltrb  = info["ltrb"]
                     batch_of_image.append(list_of_images[info["list_position"]][ ltrb[1]:ltrb[3], ltrb[0]:ltrb[2]])
                 else:
-                    if self.sahi_crop_full_frame:
-                        cropped_image = cv2.resize(list_of_images[info["list_position"]], (self.sahi_image_width_threshold, self.sahi_image_height_threshold))
+                    if self.sahi_resize_full_frame:
+                        cropped_image = cv2.resize(list_of_images[info["list_position"]], (self.sahi_slice_width, self.sahi_slice_height))
                         batch_of_image.append(cropped_image)
                     else:
                         batch_of_image.append(list_of_images[info["list_position"]])
@@ -103,6 +107,37 @@ class SAHIProcessing():
     
         return batches_of_images
 
+
+    def merge_slice_predictions(self, slice_info: Dict, list_of_predictions: List[List[float]]) -> List[List[float]]:
+        assert len(slice_info) == len(list_of_predictions), "Length of slice_info and list_of_predictions does not match"
+        merged_predictions = []
+
+        for info, preds in zip(slice_info, list_of_predictions):
+            list_position = info["list_position"]
+
+            if info["to_slice"]:
+                for pred in preds:
+                    pred[0] = info["ltrb"][0] + pred[0]
+                    pred[1] = info["ltrb"][1] + pred[1]
+                    pred[2] = info["ltrb"][0] + pred[2]
+                    pred[3] = info["ltrb"][1] + pred[3]
+            elif info["original_shape"][0] != info["resized_shape"][0] or info["original_shape"][1] != info["resized_shape"][1]:
+                multiplier_w = info["original_shape"][0] / info["resized_shape"][0]
+                multiplier_h = info["original_shape"][1] / info["resized_shape"][1]
+
+                for pred in preds:
+                    # write a function for this
+                    pred[0] = multiplier_w * pred[0]
+                    pred[1] = multiplier_h * pred[1]
+                    pred[2] = multiplier_w * pred[2]
+                    pred[3] = multiplier_h * pred[3]
+
+            if len(merged_predictions) -1 < list_position:
+                merged_predictions.append(preds)
+            else:
+                merged_predictions[list_position].extend(preds)
+
+        return merged_predictions
 
 
 
@@ -121,6 +156,32 @@ def main():
             cv2.imwrite("test/data/output/" + str(count) + ".jpg", img)
             count += 1
     
+    # simulated predictions for small-vehicles1.jpeg at 400:400 slices (left most blue car)
+    mock_predictions = [
+        [
+            [120,221,145,251,0.8,0]
+        ],
+        [
+            [320,319,385,364,0.8,0]
+        ],
+        [
+            [37,319,108,360,0.8,0]
+        ],
+        [],
+        [],
+        [
+            [321,139,386,181,0.8,0]
+        ],
+        [
+            [37,140,106,178,0.8,0]
+        ],
+        [],
+        []
+    ]
+
+    merged_p = processor.merge_slice_predictions(slice_info, mock_predictions)
+    print(merged_p)
+
 
 if __name__ == "__main__":
     main()
