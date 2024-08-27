@@ -1,6 +1,9 @@
 # SAHI_as_processing
 Using SAHI as a pre and post processing step
 
+## Impetus
+To make it easier to use sahi without changes to the main model inference code. Also to remove most dependencies so it can be lightweight for most deep learning framework to adopt. Thus, torch.tensor operations has been changed to numpy operations
+
 ## Format for slice definition
 ```
 [
