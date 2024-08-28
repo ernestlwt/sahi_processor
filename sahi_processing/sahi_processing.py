@@ -82,7 +82,7 @@ class SAHIProcessor():
 
         Parameters:
         list_of_images: List[np.ndarray]
-            list of images in numpy array format
+            list of images in numpy array format in (H, W, C)
 
         Returns:
         sliced_info: Dict
@@ -149,7 +149,7 @@ class SAHIProcessor():
 
         Parameters:
         list_of_images: List[np.ndarray]
-            list of images in numpy array format
+            list of images in numpy array format in (H, W, C)
 
         Returns:
         slice_info: Dict
@@ -157,7 +157,7 @@ class SAHIProcessor():
             Required for self.run_sahi_algo to merge the predictions
         
         batched_images: List[List[np.ndarray]]
-            List of batches of images in numpy array format
+            List of batches of images in numpy array format in (H, W, C)
         """
         slice_info = self._get_slice_info(list_of_images)
 
@@ -178,15 +178,15 @@ class SAHIProcessor():
                         batch_of_image.append(list_of_images[info["list_position"]])
             batched_images.append(batch_of_image)
     
-        return slice_info, batched_images
+        return batched_images
 
-    def _merge_slice_predictions(self, slice_info: Dict, list_of_predictions: List[List[float]]) -> List[List[float]]:
+    def _merge_slice_predictions(self, list_of_images: List[np.ndarray], list_of_predictions: List[List[float]]) -> List[List[float]]:
         """
         Merge prediction output using information from the slice_info dictionary
 
         Parameters:
-        slice_info: Dict
-            A dictionary that provides information to stich the image predictions back.
+        list_of_images: List[np.ndarray]
+            list of images in numpy array format in (H, W, C)
 
         list_of_predictions: List[List[float]]
             A list of sliced images' predictions in [l, t, r, b, score, class_id] format
@@ -195,6 +195,7 @@ class SAHIProcessor():
         merged_predictions: List[List[float]]
             A list of full images' predictions in [l, t, r, b, score, class_id] format
         """
+        slice_info = self._get_slice_info(list_of_images)
         assert len(slice_info) == len(list_of_predictions), "Length of slice_info and list_of_predictions does not match"
         merged_predictions = []
 
@@ -225,13 +226,13 @@ class SAHIProcessor():
 
         return merged_predictions
 
-    def run_sahi_algo(self, slice_info: Dict, list_of_predictions: List[List[float]]):
+    def run_sahi_algo(self, list_of_images: List[np.ndarray], list_of_predictions: List[List[float]]):
         """
         Merge prediction output using information from the slice_info dictionary
 
         Parameters:
-        slice_info: Dict
-            A dictionary that provides information to stich the image predictions back.
+        list_of_images: List[np.ndarray]
+            list of images in numpy array format in (H, W, C)
 
         list_of_predictions: List[List[float]]
             A list of sliced images' predictions in [l, t, r, b, score, class_id] format
@@ -241,7 +242,7 @@ class SAHIProcessor():
             A list of full images' prediction that has been processed with the SAHI algorithm
             that has been set when initializing the SAHIProcessor class
         """
-        merged_predictions = self._merge_slice_predictions(slice_info, list_of_predictions)
+        merged_predictions = self._merge_slice_predictions(list_of_images, list_of_predictions)
 
         processed_predictions = []
         for batch in merged_predictions:
