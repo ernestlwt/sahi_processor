@@ -11,11 +11,11 @@ from sahi.prediction import ObjectPrediction
 from sahi.postprocess.utils import ObjectPredictionList
 from sahi.postprocess.combine import NMSPostprocess, NMMPostprocess, GreedyNMMPostprocess
 
-POSTPROCESSING_ALGO = [
-    "GREEDYNMM",
-    "NMM",
-    "NMS"
-]
+POSTPROCESSING_ALGO = {
+    "GREEDYNMM": GreedyNMMPostprocess,
+    "NMM": NMMPostprocess,
+    "NMS": NMSPostprocess
+}
 
 POSTPROCESSING_METRIC = [
     "IOS",
@@ -26,8 +26,6 @@ class SAHIProcessing():
     """
     """
     model_batchsize: int = 8
-    model_input_height: int = 400
-    model_input_width: int = 400
 
     sahi_image_height_threshold: int = 900
     sahi_image_width_threshold: int = 900
@@ -48,10 +46,14 @@ class SAHIProcessing():
             if hasattr(self, key):
                 setattr(self, key, value)
         
-        assert self.sahi_postprocess_match_algo in POSTPROCESSING_ALGO, "Invalid algo, please choose among: " + str(POSTPROCESSING_ALGO)
+        assert self.sahi_postprocess_match_algo in POSTPROCESSING_ALGO.keys(), "Invalid algo, please choose among: " + str(POSTPROCESSING_ALGO.keys())
         assert self.sahi_postprocess_match_metric in POSTPROCESSING_METRIC, "Invalid metric, please choose among: " + str(POSTPROCESSING_METRIC) 
 
-        self.sahi_postprocessing_function = NMSPostprocess()
+        self.sahi_postprocessing_function = POSTPROCESSING_ALGO[self.sahi_postprocess_match_algo](
+            match_threshold=self.sahi_postprocess_match_threshold,
+            match_metric=self.sahi_postprocess_match_metric,
+            class_agnostic=self.sahi_postprocess_class_agnostic
+        )
 
     def get_slice_info(self, list_of_images: List[np.ndarray]) -> Dict:
         """
@@ -144,7 +146,7 @@ class SAHIProcessing():
 
         return merged_predictions
 
-    def predictions_to_objectprediction(self, predictions):
+    def convert_to_sahi_predictions(self, predictions):
         batch_list = []
         for batch in predictions:
             pred_list= []
@@ -153,13 +155,13 @@ class SAHIProcessing():
             batch_list.append(pred_list)
         return batch_list
 
-    def run_merging(self, list_of_predictions: List[List[float]]):
-        final_list = self.sahi_postprocessing_function(list_of_predictions)
-        return final_list
+    def run_sahi_algo(self, list_of_predictions: List[ObjectPrediction]):
+        result = self.sahi_postprocessing_function(list_of_predictions)
+        return result
 
 
 def main():
-    processor = SAHIProcessing(sahi_postprocess_match_algo="NMS", sahi_postprocess_match_metric="IOU")
+    processor = SAHIProcessing(sahi_postprocess_match_algo="NMM", sahi_postprocess_match_metric="IOS")
 
     my_image = cv2.imread("test/data/small-vehicles1.jpeg")
 
@@ -196,13 +198,9 @@ def main():
     ]
 
     merged_p = processor.merge_slice_predictions(slice_info, mock_predictions)
-    list_of_objectpredictions = processor.predictions_to_objectprediction(merged_p)
-    post_process = NMSPostprocess()
-    results = post_process(list_of_objectpredictions[0])
+    list_of_objectpredictions = processor.convert_to_sahi_predictions(merged_p)
+    results = processor.run_sahi_algo(list_of_objectpredictions[0])
     print(results)
-    # for image_pred in merged_p:
-    #     final_list = processor.run_merging(image_pred)
-    #     print(final_list)
 
 
 if __name__ == "__main__":
