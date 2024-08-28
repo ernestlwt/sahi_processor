@@ -1,4 +1,4 @@
-# SAHI_as_processing
+# SAHI_processor
 Using SAHI as a pre and post processing step
 
 ## Impetus
