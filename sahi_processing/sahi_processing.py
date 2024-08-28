@@ -5,7 +5,11 @@ import cv2
 import numpy as np
 
 from utils.misc import split_list_into_batches
-from utils.sahi import get_slice_bboxes
+
+from sahi.slicing import get_slice_bboxes
+from sahi.prediction import ObjectPrediction
+from sahi.postprocess.utils import ObjectPredictionList
+from sahi.postprocess.combine import NMSPostprocess, NMMPostprocess, GreedyNMMPostprocess
 
 POSTPROCESSING_ALGO = [
     "GREEDYNMM",
@@ -46,6 +50,8 @@ class SAHIProcessing():
         
         assert self.sahi_postprocess_match_algo in POSTPROCESSING_ALGO, "Invalid algo, please choose among: " + str(POSTPROCESSING_ALGO)
         assert self.sahi_postprocess_match_metric in POSTPROCESSING_METRIC, "Invalid metric, please choose among: " + str(POSTPROCESSING_METRIC) 
+
+        self.sahi_postprocessing_function = NMSPostprocess()
 
     def get_slice_info(self, list_of_images: List[np.ndarray]) -> Dict:
         """
@@ -107,7 +113,6 @@ class SAHIProcessing():
     
         return batches_of_images
 
-
     def merge_slice_predictions(self, slice_info: Dict, list_of_predictions: List[List[float]]) -> List[List[float]]:
         assert len(slice_info) == len(list_of_predictions), "Length of slice_info and list_of_predictions does not match"
         merged_predictions = []
@@ -139,7 +144,18 @@ class SAHIProcessing():
 
         return merged_predictions
 
+    def predictions_to_objectprediction(self, predictions):
+        batch_list = []
+        for batch in predictions:
+            pred_list= []
+            for img_pred in batch:
+                pred_list.append(ObjectPrediction(bbox=img_pred[0:4], score=img_pred[4], category_id=img_pred[5]))
+            batch_list.append(pred_list)
+        return batch_list
 
+    def run_merging(self, list_of_predictions: List[List[float]]):
+        final_list = self.sahi_postprocessing_function(list_of_predictions)
+        return final_list
 
 
 def main():
@@ -159,28 +175,34 @@ def main():
     # simulated predictions for small-vehicles1.jpeg at 400:400 slices (left most blue car)
     mock_predictions = [
         [
-            [120,221,145,251,0.8,0]
+            [120,221,145,251,0.56,0]
         ],
         [
             [320,319,385,364,0.8,0]
         ],
         [
-            [37,319,108,360,0.8,0]
+            [37,319,108,360,0.73,0]
         ],
         [],
         [],
         [
-            [321,139,386,181,0.8,0]
+            [321,139,386,181,0.72,0]
         ],
         [
-            [37,140,106,178,0.8,0]
+            [37,140,106,178,0.9,0]
         ],
         [],
         []
     ]
 
     merged_p = processor.merge_slice_predictions(slice_info, mock_predictions)
-    print(merged_p)
+    list_of_objectpredictions = processor.predictions_to_objectprediction(merged_p)
+    post_process = NMSPostprocess()
+    results = post_process(list_of_objectpredictions[0])
+    print(results)
+    # for image_pred in merged_p:
+    #     final_list = processor.run_merging(image_pred)
+    #     print(final_list)
 
 
 if __name__ == "__main__":
