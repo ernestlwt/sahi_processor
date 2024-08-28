@@ -4,8 +4,21 @@ Using SAHI as a pre and post processing step
 ## Impetus
 To make it easier to use sahi without changes to the main model inference code.
 
+## How to use
 
-## Format for slice definition
+```
+processor = SAHIProcessing()
+slice_info, batched_images = processor.get_slice_batches(list_of_images)
+
+# slice_info will explain how to stitch the prediction output back
+# run batched_images through your model and output predictions
+# combine all batch of predictions into  List[List[l, t, r, b, score, class_id]]
+
+results = processor.run_sahi_algo(slice_info, predictions)
+
+```
+
+## Format for slice info
 ```
 [
     {
@@ -31,7 +44,11 @@ To make it easier to use sahi without changes to the main model inference code.
 
 ## Format for predictions
 ```
+# List of images predictions
 [
-    [l, t, r, b, conf, class_id]
+    [ 
+        [l, t, r, b, conf, class_id],
+        [l, t, r, b, conf, class_id], ...
+    ],...
 ]
 ```

@@ -22,55 +22,106 @@ POSTPROCESSING_METRIC = [
     "IOU"
 ]
 
-class SAHIProcessing():
+class SAHIProcessor():
     """
-    """
-    model_batchsize: int = 8
+    Class that uses the SAHI algorithm to slice an entire image into smaller slices,
+    batching the slices into the model batchsize to make inference more efficient, 
+    and then merging the sliced predictions back with reference to the entire image
 
-    sahi_image_height_threshold: int = 900
-    sahi_image_width_threshold: int = 900
+    The class variables mostly come from get_sliced_prediction() at https://github.com/obss/sahi/blob/main/sahi/predict.py
+    Do refer to the official code for their explanation
+
+    Below are some explanation for the variables that have been added for this repo
+
+    Parameters:
+    image_height_threshold: int
+        only do sahi if the height of the image exceeds this
+    image_width_threshold: int
+        only do sahi if the width of the image exceeds this
+        The rationale for these 2 parameters is that since this repo is meant to batch multiple images,
+        there could be a case where we have images of different size in a batch. For image that may be
+        around the size of a single slice, there may not be a point to slice them
+    resize_full_frame: bool
+        to resize images that has not been sliced size to the slice size if True else no resizing
+    """
+    image_height_threshold: int = 600
+    image_width_threshold: int = 600
+    resize_full_frame: bool = True
+
     sahi_slice_height: int = 400
     sahi_slice_width: int = 400
     sahi_overlap_height_ratio: float = 0.3
     sahi_overlap_width_ratio: float = 0.3
-    sahi_postprocess_match_algo: str = "GREEDYNMM"
+    sahi_perform_standard_pred: bool = True
+    sahi_postprocess_type: str = "GREEDYNMM"
     sahi_postprocess_match_metric: str = "IOS"
     sahi_postprocess_match_threshold: float = 0.5
     sahi_postprocess_class_agnostic: bool = True
-    sahi_auto_slice_resolution: bool = True,
-    sahi_include_full_frame: bool = True
-    sahi_resize_full_frame: bool = True
+    sahi_auto_slice_resolution: bool = True
 
     def __init__(self, **kwargs):
+        """
+        Initialize SAHIProcessor
+        """
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
         
-        assert self.sahi_postprocess_match_algo in POSTPROCESSING_ALGO.keys(), "Invalid algo, please choose among: " + str(POSTPROCESSING_ALGO.keys())
+        assert self.sahi_postprocess_type in POSTPROCESSING_ALGO.keys(), "Invalid algo, please choose among: " + str(POSTPROCESSING_ALGO.keys())
         assert self.sahi_postprocess_match_metric in POSTPROCESSING_METRIC, "Invalid metric, please choose among: " + str(POSTPROCESSING_METRIC) 
 
-        self.sahi_postprocessing_function = POSTPROCESSING_ALGO[self.sahi_postprocess_match_algo](
+        self.sahi_postprocessing_function = POSTPROCESSING_ALGO[self.sahi_postprocess_type](
             match_threshold=self.sahi_postprocess_match_threshold,
             match_metric=self.sahi_postprocess_match_metric,
             class_agnostic=self.sahi_postprocess_class_agnostic
         )
 
-    def get_slice_info(self, list_of_images: List[np.ndarray]) -> Dict:
+    def _get_slice_info(self, list_of_images: List[np.ndarray]) -> Dict:
         """
         This function takes in a list of images and calculate how much to slice them
+
+        Parameters:
+        list_of_images: List[np.ndarray]
+            list of images in numpy array format
+
+        Returns:
+        sliced_info: Dict
+            A dictionary that provides information to stich the image predictions back.
+            Required for self.run_sahi_algo to merge the predictions
+
+            Sample Format:
+            [
+                {
+                    "list_position": 0,
+                    "to_slice": False,
+                    "original_shape": [x1, y1],
+                    "resized_shape": [x2, y2]
+                }, {
+                    "list_position": 1,
+                    "to_slice": True,
+                    "ltrb": [l, t, r, b],
+                }, {
+                "list_position": 1,
+                    "to_slice": True,
+                    "ltrb": [l, t, r, b],  
+                }, ...
+            ]
+            list_position must be ordered
+            original_shape and resize_shape will only exist when to_slice is False
+            ltrb explains is the slice location with respect to the original image
         """
-        sliced_list = []
+        sliced_info = []
         for i, image in enumerate(list_of_images):
             image_h, image_w, _ = image.shape
 
-            if image_h > self.sahi_image_height_threshold or image_w > self.sahi_image_width_threshold:
+            if image_h > self.image_height_threshold or image_w > self.image_width_threshold:
 
-                if self.sahi_include_full_frame:
-                    sliced_list.append({
+                if self.sahi_perform_standard_pred:
+                    sliced_info.append({
                         "list_position": i, 
                         "to_slice": False, 
                         "original_shape":[image_w, image_h], 
-                        "resized_shape": [self.sahi_slice_width, self.sahi_slice_height] if self.sahi_resize_full_frame else [image_w, image_h]})
+                        "resized_shape": [self.sahi_slice_width, self.sahi_slice_height] if self.resize_full_frame else [image_w, image_h]})
 
                 slice_bboxes = get_slice_bboxes(
                     image_h,
@@ -82,23 +133,37 @@ class SAHIProcessing():
                     auto_slice_resolution=self.sahi_auto_slice_resolution
                 )
                 for s_b in slice_bboxes:
-                    sliced_list.append({
+                    sliced_info.append({
                         "list_position": i, 
                         "to_slice": True,
                         "ltrb": s_b
                     })
-                    print(s_b)
             else:
-                sliced_list.append({"list_position": i, "to_slice": False})
-        return sliced_list
+                sliced_info.append({"list_position": i, "to_slice": False})
+        return sliced_info
 
-    def get_slice_batches(self, list_of_images: List[np.ndarray], slice_info: Dict) -> List[List[np.ndarray]]:
+    def get_slice_batches(self, list_of_images: List[np.ndarray], model_batchsize:int = 1) -> List[List[np.ndarray]]:
         """
-        This function takes in a list of images and the slice info generated from  get_slice_info and organize them in batches
-        """
-        batches_of_info = split_list_into_batches(slice_info, self.model_batchsize)
+        This function takes in a list of images to generate slice info
+        and batches the sliced images into the model_batchsize
 
-        batches_of_images = []
+        Parameters:
+        list_of_images: List[np.ndarray]
+            list of images in numpy array format
+
+        Returns:
+        slice_info: Dict
+            A dictionary that provides information to stich the image predictions back.
+            Required for self.run_sahi_algo to merge the predictions
+        
+        batched_images: List[List[np.ndarray]]
+            List of batches of images in numpy array format
+        """
+        slice_info = self._get_slice_info(list_of_images)
+
+        batches_of_info = split_list_into_batches(slice_info, model_batchsize)
+
+        batched_images = []
         for batch in batches_of_info:
             batch_of_image = []
             for info in batch:
@@ -106,16 +171,30 @@ class SAHIProcessing():
                     ltrb  = info["ltrb"]
                     batch_of_image.append(list_of_images[info["list_position"]][ ltrb[1]:ltrb[3], ltrb[0]:ltrb[2]])
                 else:
-                    if self.sahi_resize_full_frame:
+                    if self.resize_full_frame:
                         cropped_image = cv2.resize(list_of_images[info["list_position"]], (self.sahi_slice_width, self.sahi_slice_height))
                         batch_of_image.append(cropped_image)
                     else:
                         batch_of_image.append(list_of_images[info["list_position"]])
-            batches_of_images.append(batch_of_image)
+            batched_images.append(batch_of_image)
     
-        return batches_of_images
+        return slice_info, batched_images
 
-    def merge_slice_predictions(self, slice_info: Dict, list_of_predictions: List[List[float]]) -> List[List[float]]:
+    def _merge_slice_predictions(self, slice_info: Dict, list_of_predictions: List[List[float]]) -> List[List[float]]:
+        """
+        Merge prediction output using information from the slice_info dictionary
+
+        Parameters:
+        slice_info: Dict
+            A dictionary that provides information to stich the image predictions back.
+
+        list_of_predictions: List[List[float]]
+            A list of sliced images' predictions in [l, t, r, b, score, class_id] format
+
+        Returns:
+        merged_predictions: List[List[float]]
+            A list of full images' predictions in [l, t, r, b, score, class_id] format
+        """
         assert len(slice_info) == len(list_of_predictions), "Length of slice_info and list_of_predictions does not match"
         merged_predictions = []
 
@@ -146,62 +225,29 @@ class SAHIProcessing():
 
         return merged_predictions
 
-    def convert_to_sahi_predictions(self, predictions):
-        batch_list = []
-        for batch in predictions:
+    def run_sahi_algo(self, slice_info: Dict, list_of_predictions: List[List[float]]):
+        """
+        Merge prediction output using information from the slice_info dictionary
+
+        Parameters:
+        slice_info: Dict
+            A dictionary that provides information to stich the image predictions back.
+
+        list_of_predictions: List[List[float]]
+            A list of sliced images' predictions in [l, t, r, b, score, class_id] format
+
+        Returns:
+        processed_predictions: List[List[float]]
+            A list of full images' prediction that has been processed with the SAHI algorithm
+            that has been set when initializing the SAHIProcessor class
+        """
+        merged_predictions = self._merge_slice_predictions(slice_info, list_of_predictions)
+
+        processed_predictions = []
+        for batch in merged_predictions:
             pred_list= []
             for img_pred in batch:
                 pred_list.append(ObjectPrediction(bbox=img_pred[0:4], score=img_pred[4], category_id=img_pred[5]))
-            batch_list.append(pred_list)
-        return batch_list
-
-    def run_sahi_algo(self, list_of_predictions: List[ObjectPrediction]):
-        result = self.sahi_postprocessing_function(list_of_predictions)
-        return result
-
-
-def main():
-    processor = SAHIProcessing(sahi_postprocess_match_algo="NMM", sahi_postprocess_match_metric="IOS")
-
-    my_image = cv2.imread("test/data/small-vehicles1.jpeg")
-
-    slice_info = processor.get_slice_info([my_image])
-    batched_images = processor.get_slice_batches([my_image], slice_info)
-
-    count = 0
-    for b in batched_images:
-        for img in b:
-            cv2.imwrite("test/data/output/" + str(count) + ".jpg", img)
-            count += 1
-    
-    # simulated predictions for small-vehicles1.jpeg at 400:400 slices (left most blue car)
-    mock_predictions = [
-        [
-            [120,221,145,251,0.56,0]
-        ],
-        [
-            [320,319,385,364,0.8,0]
-        ],
-        [
-            [37,319,108,360,0.73,0]
-        ],
-        [],
-        [],
-        [
-            [321,139,386,181,0.72,0]
-        ],
-        [
-            [37,140,106,178,0.9,0]
-        ],
-        [],
-        []
-    ]
-
-    merged_p = processor.merge_slice_predictions(slice_info, mock_predictions)
-    list_of_objectpredictions = processor.convert_to_sahi_predictions(merged_p)
-    results = processor.run_sahi_algo(list_of_objectpredictions[0])
-    print(results)
-
-
-if __name__ == "__main__":
-    main()
+            
+            processed_predictions.append(self.sahi_postprocessing_function(pred_list))
+        return processed_predictions
