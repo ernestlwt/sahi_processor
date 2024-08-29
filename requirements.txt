@@ -1,4 +1,1 @@
-numpy
-opencv-python
-sahi
-torch
+sahi>=0.11.10
