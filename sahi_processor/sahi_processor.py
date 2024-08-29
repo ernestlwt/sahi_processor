@@ -246,9 +246,18 @@ class SAHIProcessor():
 
         processed_predictions = []
         for batch in merged_predictions:
-            pred_list= []
+            sahi_pred_list= []
+            # convert to SAHI's ObjectPrediction object and run SAHI's post processing
             for img_pred in batch:
-                pred_list.append(ObjectPrediction(bbox=img_pred[0:4], score=img_pred[4], category_id=img_pred[5]))
-            
-            processed_predictions.append(self.sahi_postprocessing_function(pred_list))
+                sahi_pred_list.append(ObjectPrediction(bbox=img_pred[0:4], score=img_pred[4], category_id=img_pred[5]))
+            processed_sahi_pred_list = self.sahi_postprocessing_function(sahi_pred_list)
+
+            # convert back to prediction format List[List[l, t, r, b, score, conf]]
+            pred_list = []
+            for s_p in processed_sahi_pred_list:
+                pred = processed_sahi_pred_list[0].bbox.to_xyxy()
+                pred.extend([processed_sahi_pred_list[0].score.value, processed_sahi_pred_list[0].category.id])
+                pred_list.append(pred)
+
+            processed_predictions.append(pred_list)
         return processed_predictions

@@ -14,18 +14,23 @@ Sample usage
 ```
 from sahi_processor.sahi_processor import SAHIProcessor
 
-processor = SAHIProcessing()
+processor = SAHIProcessor()
 batched_images = processor.get_slice_batches(list_of_images, model_batchsize=batchsize)
 
 # run batched_images through your model and output predictions
-# combine all batch of predictions into  List[List[l, t, r, b, score, class_id]]
+# combine all batches of predictions into  List[List[l, t, r, b, score, class_id]]
 
-results = processor.run_sahi_algo(list_of_images, predictions)
+merged_predictions = processor.run_sahi_algo(list_of_images, predictions)
 ```
 
-## Format for predictions
+A sample test script can be ran via `python tests/test.py`
+
+## Formats to note
+`list_of_images` is a list of cv2 images in `(H, W, C)`
+
+`predictions` is a list of predictions for each image.
+Below is a sample:
 ```
-# List of images predictions
 [
     [ 
         [l, t, r, b, score, class_id],
