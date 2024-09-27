@@ -255,8 +255,8 @@ class SAHIProcessor():
             # convert back to prediction format List[List[l, t, r, b, score, conf]]
             pred_list = []
             for s_p in processed_sahi_pred_list:
-                pred = processed_sahi_pred_list[0].bbox.to_xyxy()
-                pred.extend([processed_sahi_pred_list[0].score.value, processed_sahi_pred_list[0].category.id])
+                pred = s_p.bbox.to_xyxy()
+                pred.extend([s_p.score.value, s_p.category.id])
                 pred_list.append(pred)
 
             processed_predictions.append(pred_list)
