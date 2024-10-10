@@ -121,7 +121,8 @@ class SAHIProcessor():
                         "list_position": i, 
                         "to_slice": False, 
                         "original_shape":[image_w, image_h], 
-                        "resized_shape": [self.sahi_slice_width, self.sahi_slice_height] if self.resize_full_frame else [image_w, image_h]})
+                        "resized_shape": [self.sahi_slice_width, self.sahi_slice_height] if self.resize_full_frame else [image_w, image_h]
+                    })
 
                 slice_bboxes = get_slice_bboxes(
                     image_h,
@@ -139,7 +140,12 @@ class SAHIProcessor():
                         "ltrb": s_b
                     })
             else:
-                sliced_info.append({"list_position": i, "to_slice": False})
+                sliced_info.append({
+                    "list_position": i, 
+                    "to_slice": False, 
+                    "original_shape":[image_w, image_h], 
+                    "resized_shape": [self.sahi_slice_width, self.sahi_slice_height] if self.resize_full_frame else [image_w, image_h]
+                })
         return sliced_info
 
     def get_slice_batches(self, list_of_images: List[np.ndarray], model_batchsize:int = 1) -> List[List[np.ndarray]]:
